@@ -1,6 +1,4 @@
 const t = require('@babel/types');
-const babylon = require('babylon')
-const parser = require("@babel/parser");
 const generate = require('@babel/generator').default;
 const traverse = require('@babel/traverse').default;
 const Vistor = require("./Vistor");
@@ -40,7 +38,7 @@ let computedValue = {};
 let watchValue = {};
 /*
  *
- * 注：因为遍历时，会因为防止深层遍历，而直接路过子级遍历，所以enter时，有些节点会过滤掉
+ * 注：因为遍历时，会因为防止深层遍历，而直接路过子级遍历，所以如果添加enter进行全遍历时，孙级节点将跳过
  * 
  */
 const componentVistor = {
@@ -55,9 +53,12 @@ const componentVistor = {
 		declareStr += str;
 	},
 	VariableDeclaration(path) {
-		//定义的外部变量
-		// vistors.variable.handle(path.node);
-		declareStr += `${generate(path.node).code}\r\n`;
+		const parent = path.parentPath.parent;
+		if (!parent) {	
+			//定义的外部变量
+			// vistors.variable.handle(path.node);
+			declareStr += `${generate(path.node).code}\r\n`;
+		}
 	},
 	ObjectMethod(path) {
 		const parent = path.parentPath.parent;
@@ -77,7 +78,7 @@ const componentVistor = {
 				vistors.lifeCycle.handle(path.node);
 			}
 		}
-		// path.skip();
+		path.skip();
 	},
 	ObjectProperty(path) {
 		const name = path.node.key.name;
@@ -110,11 +111,23 @@ const componentVistor = {
 					watchValue = path.node.value;
 				}
 				break;
+			case 'globalData':
+				//方案一：
+				//全局变量，因为uni-app没有对应的结构，所以这里直接存入到data里，至少代码不会报错!!!
+				//vistors.data.handle(path.node);
+
+				//方案二：
+				//挂载vue的原型上，改动较少，后面再使用vuex
+				//在这里直接忽略globalData
+				break;
 			default:
 				const parent = path.parentPath.parent;
 				const value = parent.value;
 				//如果父级不为data时，那么就加入
-				if (value && value != dataValue) {
+
+				if (value == dataValue) {
+					vistors.data.handle(path.node);
+				} else {
 					const node = path.node.value;
 					if (t.isFunctionExpression(node) || t.isArrowFunctionExpression(node)) {
 						//这里function
@@ -132,15 +145,10 @@ const componentVistor = {
 							path.skip();
 						}
 					}
-				} else {
-					// console.log("add data： ", name);
-					vistors.data.handle(path.node);
-					// console.log("这里输出的是data里的属性 ", name);
 				}
 				break;
 		}
 	}
-
 }
 const componentConverter = function (ast) {
 	//清空上次的缓存

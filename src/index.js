@@ -11,20 +11,11 @@ const configHandle = require('./wx2uni/configHandle');
 
 //TODO: 日志，暂未来得及完善
 
-//输入目录
-// var sourceFolder = './weapp-douban-master';
-// var sourceFolder = "./aLuckyDog-component";
-// var sourceFolder = "./miniprogram-demo-master";
-var sourceFolder = "./testjs";
-//小程序项目目录，不一定就等于输入目录，有无云开发的目录结构是不相同的。
-var miniprogramRoot = sourceFolder;
-var targetFolder = sourceFolder + "_uni";
-
 
 /**
  * 解析小程序项目
  */
-function wxProjectParse(folder) {
+function wxProjectParse(folder, sourceFolder) {
 	let file_projectConfigJson = path.join(folder, "project.config.json");
 	let projectConfig = {
 		"name": "",
@@ -45,17 +36,21 @@ function wxProjectParse(folder) {
 			projectConfig.cloudfunctionRoot = path.resolve(sourceFolder, data.cloudfunctionRoot);
 
 			//如果是有云函数的项目，那么工作目录将设置为miniprogramRoot
-			miniprogramRoot = projectConfig.miniprogramRoot;
+			// miniprogramRoot = projectConfig.miniprogramRoot;
 
 			//读取package.json
 			let file_package = path.join(folder, "package.json");
-			let packageJson = fs.readJsonSync(file_package);
-			//
-			projectConfig.name = packageJson.name;
-			projectConfig.version = packageJson.version;
-			projectConfig.description = packageJson.description;
-			//author用不到，先留着
-			projectConfig.author = packageJson.author;
+			if (fs.existsSync(file_package)) {
+				let packageJson = fs.readJsonSync(file_package);
+				//
+				projectConfig.name = packageJson.name;
+				projectConfig.version = packageJson.version;
+				projectConfig.description = packageJson.description;
+				//author用不到，先留着
+				projectConfig.author = packageJson.author;
+			} else {
+				console.log(`error： 找不到package.json文件`)
+			}
 		} else {
 			//无云函数
 			projectConfig.miniprogramRoot = folder;
@@ -64,7 +59,7 @@ function wxProjectParse(folder) {
 		projectConfig.appid = data.appid;
 		projectConfig.compileType = data.compileType;
 	} else {
-		throw ("error： 这个目录应该不是小程序的目录")
+		throw (`error： 这个目录${sourceFolder}应该不是小程序的目录`)
 		return false;
 	}
 	return projectConfig;
@@ -88,7 +83,7 @@ let routerData = {};
 
 
 //遍历目录
-function traverseFolder(folder, callback) {
+function traverseFolder(folder, miniprogramRoot, targetFolder, callback) {
 	fs.readdir(folder, function (err, files) {
 		var count = 0
 		var checkEnd = function () {
@@ -101,7 +96,7 @@ function traverseFolder(folder, callback) {
 			fs.stat(fileDir, function (err, stats) {
 				if (stats.isDirectory()) {
 					fs.mkdirSync(newFileDir);
-					return traverseFolder(fileDir, checkEnd);
+					return traverseFolder(fileDir, miniprogramRoot, targetFolder, checkEnd);
 				} else {
 					/*not use ignore files*/
 					if (fileName[0] == '.') {
@@ -148,10 +143,10 @@ function traverseFolder(folder, callback) {
 								break;
 							default:
 								fs.copySync(fileDir, newFileDir);
-								log.path = {
-									...log.path,
-									...newFileDir
-								};
+								// log.path = {
+								// 	...log.path,
+								// 	...newFileDir
+								// };
 								break;
 						}
 					}
@@ -192,8 +187,7 @@ async function filesHandle(fileData) {
 
 					//组装vue文件名
 					let targetFilePath = path.join(tFolder, fileName + ".vue");
-					console.log("-------------", targetFilePath);
-
+					// console.log("-------------", targetFilePath);
 
 					// * 单个情况：
 					// * 单个wxml的情况-->转换为vue
@@ -204,15 +198,14 @@ async function filesHandle(fileData) {
 					var hasJSFile = false;
 					var hasWxssFile = false;
 
-					if ((file_wxml && file_js) || (file_wxss && file_js)) {
-						//当有wxml，那必然会有js文件，可能会有wxss文件
+					if ((file_wxml && file_js) || (file_wxss && file_js) || file_wxml) {
+						//当有wxml，那必然会有js文件，可能会有wxss文件，单独的.wxml，转为.vue
 						extName = ".vue";
 						hasAllFile = true;
 					} else if (file_js) {
 						//除了上面至少两种文件存在的情况，那么这里就是单独存在的js文件
 						extName = ".js";
 						hasJSFile = true;
-
 					} else if (file_wxss) {
 						//与js文件类似，这里只可能是单独存在的wxss文件
 						extName = ".css";
@@ -305,26 +298,27 @@ async function filesHandle(fileData) {
 }
 
 ////////////////////////////转换入口/////////////////////////////
-module.exports = async function transform(sourceFolder, targetFolder) {
+async function transform(sourceFolder, targetFolder) {
 	fileData = {};
 	routerData = {};
-	//
-	sourceFolder = sourceFolder;
-	//小程序项目目录，不一定就等于输入目录，有无云开发的目录结构是不相同的。
-	miniprogramRoot = sourceFolder;
+
+	let miniprogramRoot = sourceFolder;
 	if (!targetFolder) targetFolder = sourceFolder + "_uni";
 	//读取小程序项目配置
 	const configData = wxProjectParse(miniprogramRoot, sourceFolder);
 
-	//不存在就创建
-	if (!fs.existsSync(targetFolder)) {
-		fs.mkdirSync(targetFolder);
-	} else {
+	//小程序项目目录，不一定就等于输入目录，有无云开发的目录结构是不相同的。
+	miniprogramRoot = configData.miniprogramRoot;
+
+	if (fs.existsSync(targetFolder)) {
 		//清空output目录
 		fs.emptyDirSync(targetFolder);
+	} else {
+		//不存在就创建
+		fs.mkdirSync(targetFolder);
 	}
 
-	traverseFolder(miniprogramRoot, function () {
+	traverseFolder(miniprogramRoot, miniprogramRoot, targetFolder, function () {
 		// console.log(JSON.stringify(fileData));
 		// log.data = {
 		// 	...log.data,
@@ -340,3 +334,5 @@ module.exports = async function transform(sourceFolder, targetFolder) {
 		configHandle(configData, routerData, miniprogramRoot, targetFolder);
 	});
 }
+module.exports = transform;
+
